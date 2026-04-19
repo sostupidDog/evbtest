@@ -42,7 +42,16 @@ class SerialTCPConnection(ConnectionBase):
         self._stop_event = threading.Event()
 
     def connect(self) -> None:
-        """Establish TCP connection to serial port server."""
+        """Establish TCP connection to serial port server.
+
+        Safe to call on an already-disconnected connection (reconnect scenario):
+        cleans up stale resources before attempting a new connection.
+        """
+        # Clean up any stale resources from a previous session
+        if self._state not in (ConnectionState.DISCONNECTED, ConnectionState.ERROR):
+            self.disconnect()
+        self._buffer.clear()
+
         self._state = ConnectionState.CONNECTING
         try:
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

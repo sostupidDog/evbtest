@@ -38,6 +38,10 @@ class ConnectionBase(ABC):
     def state(self) -> ConnectionState:
         return self._state
 
+    def is_connected(self) -> bool:
+        """Check if connection is alive."""
+        return self._state == ConnectionState.CONNECTED
+
     @abstractmethod
     def connect(self) -> None:
         """Establish connection. Raises ConnectionError on failure."""

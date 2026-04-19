@@ -161,7 +161,30 @@ class ParallelRunner:
         device_config: DeviceConfig,
         connection,
     ) -> TestResult:
-        """Run a single test using an existing connection (sync, in thread)."""
+        """Run a single test using an existing connection (sync, in thread).
+
+        Checks connection health before execution and auto-reconnects if needed.
+        """
+        # Health check: reconnect if connection dropped
+        if not connection.is_connected():
+            self._log.warning(
+                f"Connection to {task.device_name} lost, reconnecting..."
+            )
+            connection.close_session_log()
+            try:
+                connection.connect()
+                self._log.info(f"Reconnected to {task.device_name}")
+            except Exception as e:
+                self._log.error(f"Reconnect to {task.device_name} failed: {e}")
+                return TestResult(
+                    device=task.device_name,
+                    test=task.test_name,
+                    status="ERROR",
+                    error=f"Connection lost and reconnect failed: {e}",
+                    start_time=time.monotonic(),
+                    end_time=time.monotonic(),
+                )
+
         # Setup session log for this task
         log_path = None
         if self._enable_logging:

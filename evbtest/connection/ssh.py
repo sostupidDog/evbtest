@@ -51,7 +51,16 @@ class SSHConnection(ConnectionBase):
         self._stop_event = threading.Event()
 
     def connect(self) -> None:
-        """Establish SSH connection and open interactive shell."""
+        """Establish SSH connection and open interactive shell.
+
+        Safe to call on an already-disconnected connection (reconnect scenario):
+        cleans up stale resources before attempting a new connection.
+        """
+        # Clean up any stale resources from a previous session
+        if self._state not in (ConnectionState.DISCONNECTED, ConnectionState.ERROR):
+            self.disconnect()
+        self._buffer.clear()
+
         self._state = ConnectionState.CONNECTING
         try:
             self._client = paramiko.SSHClient()
