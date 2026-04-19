@@ -114,6 +114,20 @@ class YAMLTestCaseRunner:
                         error=f"Expected pattern not found: {expect}",
                     )
 
+                # Verify expect_not: output must NOT contain this pattern
+                expect_not = step.get("expect_not")
+                if expect_not:
+                    not_match = re.search(expect_not, result.output)
+                    if not_match:
+                        return StepResult(
+                            name=name,
+                            success=False,
+                            output=result.output,
+                            elapsed=result.elapsed,
+                            error=f"Unexpected pattern found: {not_match.group()!r} "
+                                  f"(expect_not: {expect_not})",
+                        )
+
                 if delay_after > 0:
                     time.sleep(delay_after)
                 return StepResult(
