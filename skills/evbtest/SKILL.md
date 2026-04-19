@@ -1,7 +1,7 @@
 ---
 name: evbtest
 description: Use when the user asks to write/run device tests, test firmware, test kernel drivers, SSH tests, serial tests, or mentions "evb-test" / "evbtest". Use for automating commands on remote devices via SSH or serial console.
-version: 0.2.0
+version: 0.3.0
 ---
 
 # evbtest — Remote Device Test Framework

@@ -8,6 +8,10 @@ Lightweight Python framework for automated testing on remote devices via SSH or 
 - **SSH & Serial TCP** — Connect via SSH or Talent network-to-serial converter
 - **Multi-device parallel** — Run tests across multiple devices concurrently
 - **Connection pooling & auto-reconnect** — Reuses connections across tests, auto-recovers from drops
+- **File transfer** — SFTP upload/download for SSH connections
+- **Reboot with auto-reconnect** — Reboot device and automatically reconnect with retry
+- **Preflight checks** — Environment validation before tests; skip device on failure
+- **Negative assertions** — `expect_not` to catch unwanted output patterns
 - **Session logging** — Per-test log files capturing all device I/O for post-analysis
 - **Rich CLI output** — Real-time progress, result tables, failure details
 
