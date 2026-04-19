@@ -101,15 +101,16 @@ class SerialTCPConnection(ConnectionBase):
         if self._socket is None:
             raise ConnectionError("Not connected")
         if isinstance(data, str):
-            self._buffer.log_send(data)
             data = data.encode("utf-8")
-        else:
-            self._buffer.log_send(data.decode("utf-8", errors="replace"))
         self._socket.sendall(data)
 
     def drain(self) -> None:
         """Discard any buffered output."""
         self._buffer.drain()
+
+    def log_command_block(self, command: str, output: str) -> None:
+        """Write a structured command+output block to session log."""
+        self._buffer.log_command_block(command, output)
 
     def read(self, timeout: float | None = None) -> str:
         """Return everything accumulated in the buffer since last read."""

@@ -64,23 +64,66 @@ class YAMLTestCaseRunner:
             # Handle delay_before
             delay_before = step.get("delay_before", 0)
             if delay_before > 0:
-                import time
                 time.sleep(delay_before)
 
-            # Send
+            # Handle delay_after
+            delay_after = step.get("delay_after", 0)
+
+            # Raw send (Ctrl-C, special sequences)
             if step.get("send_raw"):
                 raw_data = step["send_raw"].encode("utf-8").decode("unicode_escape")
                 self._device.send_raw(raw_data)
-            elif step.get("send_no_newline"):
-                self._device._conn.send(step["send_no_newline"])
-            elif step.get("send"):
-                self._device._conn.send(step["send"] + "\n")
-
-            # Fire-and-forget
-            if step.get("fire_and_forget"):
+                if delay_after > 0:
+                    time.sleep(delay_after)
                 return StepResult(name=name, success=True)
 
-            # Wait for pattern
+            # Send without newline
+            if step.get("send_no_newline"):
+                self._device._conn.send(step["send_no_newline"])
+                if delay_after > 0:
+                    time.sleep(delay_after)
+                return StepResult(name=name, success=True)
+
+            # Standard send + wait_for: use executor for proper sequencing & logging
+            if step.get("send"):
+                cmd = step["send"]
+                wait_pattern = step.get("wait_for")
+
+                if step.get("fire_and_forget"):
+                    self._device._conn.send(cmd + "\n")
+                    self._device._conn.log_command_block(cmd, "")
+                    if delay_after > 0:
+                        time.sleep(delay_after)
+                    return StepResult(name=name, success=True)
+
+                if wait_pattern:
+                    result = self._device.execute(
+                        cmd, wait_for=wait_pattern, timeout=timeout
+                    )
+                else:
+                    result = self._device.execute(cmd, timeout=timeout)
+
+                # Verify expect pattern against output
+                expect = step.get("expect")
+                if expect and not re.search(expect, result.output):
+                    return StepResult(
+                        name=name,
+                        success=False,
+                        output=result.output,
+                        elapsed=result.elapsed,
+                        error=f"Expected pattern not found: {expect}",
+                    )
+
+                if delay_after > 0:
+                    time.sleep(delay_after)
+                return StepResult(
+                    name=name,
+                    success=True,
+                    output=result.output,
+                    elapsed=result.elapsed,
+                )
+
+            # Wait-only step (no send, just watch for pattern)
             wait_for = step.get("wait_for")
             if wait_for:
                 result = self._device.wait_for(wait_for, timeout=timeout)
@@ -105,26 +148,8 @@ class YAMLTestCaseRunner:
                         error=f"Timeout waiting for: {wait_for}",
                     )
 
-            # Verify expect pattern
-            expect = step.get("expect")
-            if expect:
-                last_output = self._device._executor._conn.read(timeout=2.0)
-                accumulated = self._device._executor._conn._buffer.get_all()
-                search_text = last_output + accumulated
-                if not re.search(expect, search_text):
-                    return StepResult(
-                        name=name,
-                        success=False,
-                        output=search_text[-500:],
-                        error=f"Expected pattern not found: {expect}",
-                    )
-
-            # Handle delay_after
-            delay_after = step.get("delay_after", 0)
             if delay_after > 0:
-                import time
                 time.sleep(delay_after)
-
             return StepResult(name=name, success=True)
 
         except PatternTimeoutError as e:

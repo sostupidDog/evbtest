@@ -53,9 +53,12 @@ class CommandExecutor:
     ) -> CommandResult:
         """Execute command and wait for response.
 
+        Always waits for the default prompt to ensure complete output capture.
+        If wait_for is provided, additionally verifies it appears in the output.
+
         Args:
             command: The command string to send.
-            wait_for: Regex pattern to wait for. If None, uses default_prompt.
+            wait_for: Optional regex to verify in output after prompt returns.
                       Pass "" (empty string) for fire-and-forget.
             timeout: Seconds to wait. None uses connection default.
             send_newline: Whether to append \\n to command.
@@ -64,10 +67,9 @@ class CommandExecutor:
             CommandResult with output, match, timing.
 
         Raises:
-            PatternTimeoutError if pattern not matched within timeout.
+            PatternTimeoutError if prompt or wait_for pattern not matched.
         """
         effective_timeout = timeout or self._conn.timeout
-        effective_pattern = wait_for if wait_for is not None else self._default_prompt
 
         start = time.monotonic()
         # Drain stale output before sending, so read_until only matches
@@ -77,15 +79,18 @@ class CommandExecutor:
         if send_newline:
             self._conn.send("\n")
 
-        if effective_pattern == "":
+        if wait_for == "":
             # Fire-and-forget
             return CommandResult(command=command, output="", elapsed=0.0)
 
-        output, match = self._conn.read_until(effective_pattern, timeout=effective_timeout)
+        # Always wait for default prompt — guarantees complete output
+        output, match = self._conn.read_until(
+            self._default_prompt, timeout=effective_timeout
+        )
         elapsed = time.monotonic() - start
 
         if match is None:
-            raise PatternTimeoutError(effective_pattern, output, effective_timeout)
+            raise PatternTimeoutError(self._default_prompt, output, effective_timeout)
 
         # Strip the echoed command line from output
         clean_output = self._strip_echo(command, output) if self._echo_strip else output
@@ -93,6 +98,16 @@ class CommandExecutor:
         clean_output = _ANSI_RE.sub("", clean_output)
         # Normalize line endings
         clean_output = clean_output.replace("\r\n", "\n").replace("\r", "")
+
+        # Verify optional wait_for pattern appears in output
+        if wait_for is not None:
+            wf_match = re.search(wait_for, clean_output)
+            if wf_match is None:
+                raise PatternTimeoutError(wait_for, clean_output, effective_timeout)
+            match = wf_match
+
+        # Log the complete command block to session log
+        self._conn.log_command_block(command, clean_output)
 
         return CommandResult(
             command=command,
@@ -130,6 +145,9 @@ class CommandExecutor:
         # Strip ANSI escapes and normalize line endings
         output = _ANSI_RE.sub("", output)
         output = output.replace("\r\n", "\n").replace("\r", "")
+
+        # Log to session log
+        self._conn.log_command_block(f"<wait: {pattern}>", output)
 
         return CommandResult(
             command="<wait>",

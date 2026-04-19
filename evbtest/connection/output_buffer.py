@@ -40,17 +40,48 @@ class OutputBuffer:
                 self._log_file.close()
                 self._log_file = None
 
+    # ANSI escape sequence pattern
+    _ANSI_RE = re.compile(r"\x1b\[[^a-zA-Z]*[a-zA-Z]|\x1b\][^\x07]*\x07")
+
     def _write_log(self, direction: str, text: str) -> None:
-        """Write a log entry. direction is '>>>' for sent, '<<<' for received."""
+        """Write a log entry.
+
+        For sends (>>>): write a single marked line with timestamp.
+        For receives (<<<): append cleaned text as-is, no per-chunk prefix.
+        """
         with self._log_lock:
-            if self._log_file:
+            if not self._log_file:
+                return
+            if direction == ">>>":
                 ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-                self._log_file.write(f"[{ts}] {direction} {text}")
-                self._log_file.flush()
+                self._log_file.write(f"\n[{ts}] >>> {text.strip()}\n")
+            else:
+                # Strip ANSI and normalize line endings for readability
+                clean = self._ANSI_RE.sub("", text)
+                clean = clean.replace("\r\n", "\n").replace("\r", "")
+                self._log_file.write(clean)
+            self._log_file.flush()
 
     def log_send(self, data: str) -> None:
         """Log data sent to device."""
         self._write_log(">>>", data)
+
+    def log_command_block(self, command: str, output: str) -> None:
+        """Write a structured command+output block to the session log.
+
+        Called from the executor after a command completes, ensuring
+        proper ordering (no interleaving with other commands).
+        """
+        with self._log_lock:
+            if not self._log_file:
+                return
+            ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            self._log_file.write(f"\n[{ts}] >>> {command}\n")
+            if output:
+                self._log_file.write(output)
+                if not output.endswith("\n"):
+                    self._log_file.write("\n")
+            self._log_file.flush()
 
     def append(self, text: str) -> None:
         """Add new output data. Called from reader threads."""
@@ -62,8 +93,6 @@ class OutputBuffer:
                 self._buffer = self._buffer[overflow:]
                 self._read_pos = max(0, self._read_pos - overflow)
             self._condition.notify_all()
-        # Log outside the condition lock to avoid contention
-        self._write_log("<<<", text)
 
     def read_new(self, wait: bool = False, timeout: float = 1.0) -> str:
         """Return all text since last read_new call. Advances read position."""

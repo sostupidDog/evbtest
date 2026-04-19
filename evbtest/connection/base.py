@@ -77,6 +77,11 @@ class ConnectionBase(ABC):
         """Close session log file."""
         self._session_log_path = None
 
+    def log_command_block(self, command: str, output: str) -> None:
+        """Write a structured command+output block to the session log."""
+        # Default: no-op. Subclasses with a buffer override this.
+        pass
+
     def __enter__(self):
         self.connect()
         return self
