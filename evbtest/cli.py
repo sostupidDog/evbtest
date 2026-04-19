@@ -34,7 +34,7 @@ def cli(ctx, verbose):
     default="configs/devices.yaml",
     help="Device config file",
 )
-@click.option("--tests", "-t", multiple=True, help="Test files or directories")
+@click.option("--tests", "-t", multiple=True, default=("testcases/",), help="Test files or directories (default: testcases/)")
 @click.option("--device", "-D", "device_filter", default=None, help="Run only on this device")
 @click.option("--tags", multiple=True, help="Filter tests by tag")
 @click.option("--max-concurrent", "-j", default=5, help="Max parallel devices")
@@ -68,7 +68,9 @@ def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, out
         console.print("[yellow]No test files found[/yellow]")
         sys.exit(0)
 
-    console.print(f"Found {len(test_files)} test file(s)")
+    console.print(f"Found {len(test_files)} test file(s):")
+    for tf in test_files:
+        console.print(f"  [dim]{tf}[/dim]")
     console.print(f"Devices: {', '.join(device_configs.keys())}")
 
     # Build tasks: each test × each device
@@ -86,10 +88,29 @@ def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, out
                 )
             )
 
+    console.print(f"Total: {len(tasks)} task(s)\n")
+
+    # Progress callback: print result as each task completes
+    completed = [0]
+    total_tasks = len(tasks)
+
+    def on_task_complete(task):
+        completed[0] += 1
+        r = task.result
+        if r is None:
+            return
+        status_color = "green" if r.status == "PASS" else "red"
+        console.print(
+            f"  [{completed[0]}/{total_tasks}] "
+            f"[{status_color}]{r.status}[/{status_color}] "
+            f"{r.test} @ {r.device} ({r.duration:.1f}s)"
+        )
+
     # Run tests
+    console.print("[bold]Running tests...[/bold]")
     runner = ParallelRunner(
         device_configs, max_concurrent=max_concurrent, log_dir=output,
-        enable_logging=not no_log,
+        enable_logging=not no_log, on_task_complete=on_task_complete,
     )
     result = asyncio.run(runner.run_tests(tasks))
 

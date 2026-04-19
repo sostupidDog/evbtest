@@ -47,11 +47,13 @@ class ParallelRunner:
         max_concurrent: int = 10,
         log_dir: str = "logs",
         enable_logging: bool = True,
+        on_task_complete=None,
     ):
         self._device_configs = device_configs
         self._max_concurrent = max_concurrent
         self._log_dir = log_dir
         self._enable_logging = enable_logging
+        self._on_task_complete = on_task_complete
         self._log = logging.getLogger("evbtest.parallel")
         self._run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -110,6 +112,9 @@ class ParallelRunner:
                     start_time=time.monotonic(),
                     end_time=time.monotonic(),
                 )
+            finally:
+                if self._on_task_complete:
+                    self._on_task_complete(task)
 
     def _execute_sync(self, task: DeviceTestTask) -> TestResult:
         """Synchronous test execution (runs in thread pool)."""

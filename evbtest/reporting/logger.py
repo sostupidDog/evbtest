@@ -48,7 +48,7 @@ class TestLogger:
         )
 
     def print_summary(self, run_result: ParallelRunResult) -> None:
-        """Print final summary table."""
+        """Print final summary table with failure details."""
         table = Table(title="Test Results Summary")
         table.add_column("Device")
         table.add_column("Test")
@@ -65,9 +65,28 @@ class TestLogger:
             )
 
         self.console.print(table)
+
+        # Show failure details
+        failed_results = [r for r in run_result.results if r.status in ("FAIL", "ERROR")]
+        if failed_results:
+            self.console.print("\n[bold red]Failed Tests:[/bold red]")
+            for r in failed_results:
+                self.console.print(f"\n  [red]✗[/red] {r.test} @ {r.device}")
+                if r.error:
+                    self.console.print(f"    [dim]Error: {r.error}[/dim]")
+                for step in r.steps:
+                    if not step.success:
+                        self.console.print(
+                            f"    [yellow]Step '{step.name}'[/yellow]: {step.error or 'failed'}"
+                        )
+                        if step.output:
+                            for line in step.output.strip().split("\n")[-3:]:
+                                self.console.print(f"      [dim]{line}[/dim]")
+
         self.console.print(
             f"\n[bold]Total: {run_result.total} | "
             f"[green]Passed: {run_result.passed}[/green] | "
             f"[red]Failed: {run_result.failed}[/red] | "
-            f"[yellow]Errors: {run_result.errors}[/yellow][/bold]"
+            f"[yellow]Errors: {run_result.errors}[/yellow][/bold] "
+            f"in {run_result.duration:.1f}s"
         )

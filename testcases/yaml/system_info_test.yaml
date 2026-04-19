@@ -1,0 +1,41 @@
+# System information verification test
+test:
+  name: "system_info_test"
+  description: "Verify system information and resource availability"
+  tags: ["system", "info"]
+
+  device: "test_server"
+
+  settings:
+    default_timeout: 15
+    fail_fast: true
+
+  phases:
+    - name: "kernel_checks"
+      steps:
+        - name: "check_kernel_version"
+          send: "uname -r"
+          wait_for: "\\d+\\.\\d+"
+          timeout: 5
+
+        - name: "check_arch"
+          send: "uname -m"
+          wait_for: "x86_64"
+          timeout: 5
+
+        - name: "check_cpu_count"
+          send: "nproc"
+          wait_for: "\\d+"
+          timeout: 5
+
+    - name: "resource_checks"
+      steps:
+        - name: "check_root_disk"
+          send: "df -h /"
+          wait_for: "/dev/"
+          timeout: 5
+
+        - name: "check_swap"
+          send: "free -h | grep Swap"
+          wait_for: "Swap"
+          timeout: 5
