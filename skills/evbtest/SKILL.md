@@ -76,7 +76,7 @@ test:
           wait_for: "=>"
 ```
 
-Step fields: `send`, `send_raw`, `wait_for` (regex), `expect` (extra assertion), `timeout`, `on_timeout` (fail|continue), `delay_before`, `delay_after`.
+Step fields: `send`, `send_raw`, `wait_for` (regex, must match), `expect` (extra positive assertion), `expect_not` (negative assertion — output must NOT contain), `timeout`, `on_timeout` (fail|continue), `delay_before`, `delay_after`.
 
 ### Python (`testcases/python/*.py`)
 

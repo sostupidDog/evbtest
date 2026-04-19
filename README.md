@@ -146,7 +146,8 @@ test:
         - name: "step_name"
           send: "command"              # Send command + newline
           wait_for: "regex_pattern"    # Wait for regex match
-          expect: "regex_pattern"      # Additional assertion
+          expect: "regex_pattern"      # Additional positive assertion
+          expect_not: "regex_pattern"  # Negative assertion (must NOT appear)
           timeout: 30
           on_timeout: "fail"           # fail | continue
           delay_before: 0.5
@@ -158,9 +159,27 @@ test:
 **Key points:**
 - `send` sends command + newline, then waits for prompt
 - `wait_for` is a Python regex checked against command output
-- `expect` is an additional regex assertion on output
+- `expect` is an additional positive regex assertion on output
+- `expect_not` is a negative assertion — output must NOT contain this pattern
 - Omit `wait_for` for fire-and-forget commands
 - Use `(?i)` prefix for case-insensitive matching: `wait_for: "(?i)linux"`
+
+**Three assertions explained:**
+
+| Field | Direction | Use case |
+|-------|-----------|----------|
+| `wait_for` | must contain | Confirm command completed / keyword appeared |
+| `expect` | must contain | Extra positive check (e.g. checksum ok) |
+| `expect_not` | must NOT contain | Catch failures (e.g. "fail\|error\|panic") |
+
+Example — multi-line results where any "fail" means the test failed:
+
+```yaml
+- name: "run_benchmark"
+  send: "./run_benchmark.sh"
+  wait_for: "All done"
+  expect_not: "fail|FAIL|error"
+```
 
 ## Python Test API
 
