@@ -242,6 +242,14 @@ class SmokeTest(TestCase):
         d.flash_via_tftp("192.168.1.100", "firmware.bin")
         d.boot_and_login(boot_timeout=120)
 
+        # File transfer (SSH only)
+        d.upload("/local/firmware.bin", "/tmp/firmware.bin")
+        d.download("/tmp/result.log", "/local/result.log")
+
+        # Reboot with auto-reconnect
+        d.reboot(timeout=120)            # Auto-detects SSH vs serial prompt
+        d.execute("uname -r")            # Already reconnected
+
     def setup(self):
         """Optional pre-test setup"""
 
@@ -258,6 +266,9 @@ class SmokeTest(TestCase):
 | `wait_for_any(patterns, timeout)` | `(CommandResult, int)` | Wait for first match from list |
 | `send_raw(data)` | — | Send raw bytes |
 | `send_line(text)` | — | Send text + newline, no wait |
+| `upload(local, remote, timeout)` | — | Upload file via SFTP (SSH only) |
+| `download(remote, local, timeout)` | — | Download file via SFTP (SSH only) |
+| `reboot(wait_for, timeout)` | `CommandResult` | Reboot, auto-reconnect, wait for ready |
 | `interrupt_uboot(...)` | — | Interrupt U-Boot autoboot |
 | `flash_via_tftp(server, image, ...)` | `CommandResult` | TFTP download + flash |
 | `boot_and_login(...)` | — | Wait for boot then login |

@@ -119,6 +119,9 @@ class MyTest(TestCase):
         d.interrupt_uboot()                   # U-Boot convenience
         d.flash_via_tftp(server, image)       # TFTP flash
         d.boot_and_login()                    # Boot + login
+        d.upload("/local/file", "/remote/file")  # SFTP upload (SSH only)
+        d.download("/remote/file", "/local/file")  # SFTP download (SSH only)
+        d.reboot(timeout=120)                 # Reboot + auto-reconnect
 
     def setup(self):    ...                   # Optional
     def teardown(self): ...                   # Optional, runs on failure too
