@@ -1,0 +1,39 @@
+# Device definitions for evb-test
+devices:
+  evb_board_1:
+    description: "ARM64 EVB board via Talent serial server"
+    tags: ["arm64", "flash-capable", "bench-1"]
+    connection:
+      type: serial_tcp
+      host: 192.168.1.200
+      port: 5001
+      timeout: 30.0
+    prompt_pattern: "[#\\$>]\\s*$"
+    uboot_prompt: "=>"
+    login_prompt: "login:"
+    env:
+      TFTP_SERVER: "192.168.1.100"
+      FIRMWARE_IMAGE: "firmware_v2.1.bin"
+
+  evb_board_2:
+    description: "ARM64 EVB board on bench 2"
+    tags: ["arm64", "flash-capable", "bench-2"]
+    connection:
+      type: serial_tcp
+      host: 192.168.1.201
+      port: 5001
+    prompt_pattern: "[#\\$>]\\s*$"
+    uboot_prompt: "=>"
+    login_prompt: "login:"
+
+  test_server:
+    description: "Remote test server via SSH"
+    tags: ["test", "ssh"]
+    connection:
+      type: ssh
+      host: 139.224.205.233
+      port: 22
+      username: root
+      password: "hchch123.."
+      timeout: 30.0
+    prompt_pattern: "[#\\$]\\s*$"

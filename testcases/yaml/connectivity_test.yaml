@@ -1,0 +1,45 @@
+# Simple connectivity test for remote SSH server
+test:
+  name: "connectivity_test"
+  description: "Basic connectivity and command execution test"
+  tags: ["smoke", "connectivity"]
+
+  device: "test_server"
+
+  settings:
+    default_timeout: 15
+    fail_fast: true
+
+  phases:
+    - name: "basic_commands"
+      description: "Run simple commands to verify SSH connection"
+      steps:
+        - name: "check_uname"
+          send: "uname -a"
+          wait_for: "GNU/Linux"
+          timeout: 10
+
+        - name: "check_hostname"
+          send: "hostname"
+          wait_for: "(?i)izuf"
+          timeout: 5
+
+        - name: "check_uptime"
+          send: "uptime"
+          wait_for: "load average"
+          timeout: 5
+
+        - name: "check_echo"
+          send: "echo hello_evb_test"
+          wait_for: "hello_evb_test"
+          timeout: 5
+
+        - name: "check_memory"
+          send: "free -h"
+          wait_for: "Mem:"
+          timeout: 5
+
+        - name: "check_disk"
+          send: "df -h /"
+          wait_for: "/dev/"
+          timeout: 5

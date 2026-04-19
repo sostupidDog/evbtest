@@ -1,0 +1,76 @@
+# U-Boot firmware flashing and verification test
+test:
+  name: "firmware_flash_and_verify"
+  description: "Flash new firmware via TFTP and verify boot"
+  tags: ["flash", "uboot", "firmware"]
+
+  device: "evb_board_1"
+
+  settings:
+    default_timeout: 60
+    fail_fast: true
+    echo_strip: true
+    log_output: true
+
+  phases:
+    - name: "interrupt_uboot"
+      description: "Interrupt U-Boot autoboot"
+      steps:
+        - name: "wait_for_uboot_prompt"
+          wait_for: "Hit any key to stop autoboot"
+          timeout: 30
+
+        - name: "send_interrupt"
+          send_raw: "\x03"
+          wait_for: "=>"
+          timeout: 5
+
+    - name: "configure_tftp"
+      description: "Set up TFTP parameters in U-Boot"
+      steps:
+        - name: "set_server_ip"
+          send: "setenv serverip 192.168.1.100"
+          wait_for: "=>"
+
+        - name: "set_client_ip"
+          send: "setenv ipaddr 192.168.1.50"
+          wait_for: "=>"
+
+    - name: "flash_firmware"
+      description: "Download and flash firmware image"
+      steps:
+        - name: "tftp_download"
+          send: "tftpboot 0x80000000 firmware_v2.1.bin"
+          wait_for: "Bytes transferred"
+          timeout: 120
+
+        - name: "flash_to_nand"
+          send: "nand write.raw.noskip 0x80000000 0x0 0x400000"
+          wait_for: "=>"
+          timeout: 180
+
+    - name: "boot_and_verify"
+      description: "Boot new firmware and verify"
+      steps:
+        - name: "boot_command"
+          send: "boot"
+          wait_for: "Linux version"
+          timeout: 120
+
+        - name: "wait_for_login"
+          wait_for: "login:"
+          timeout: 60
+
+        - name: "send_login"
+          send: "root"
+          wait_for: "#"
+
+        - name: "check_firmware_version"
+          send: "cat /etc/firmware-version"
+          expect: "v2\\.1"
+          timeout: 10
+
+        - name: "check_kernel_modules"
+          send: "lsmod"
+          expect: "my_driver"
+          timeout: 10

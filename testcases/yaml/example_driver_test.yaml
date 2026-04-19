@@ -1,0 +1,48 @@
+# Kernel driver validation test
+test:
+  name: "kernel_driver_validation"
+  description: "Verify custom kernel driver loads and functions"
+  tags: ["driver", "kernel"]
+
+  device: "evb_board_1"
+
+  settings:
+    default_timeout: 30
+    fail_fast: true
+
+  phases:
+    - name: "load_module"
+      steps:
+        - name: "insmod"
+          send: "insmod /lib/modules/my_driver.ko"
+          wait_for: "#"
+          timeout: 10
+
+        - name: "verify_loaded"
+          send: "lsmod | grep my_driver"
+          expect: "my_driver"
+          timeout: 5
+
+        - name: "check_dmesg"
+          send: "dmesg | tail -5"
+          expect: "driver initialized successfully"
+          timeout: 5
+
+    - name: "test_device_node"
+      steps:
+        - name: "check_dev_node"
+          send: "ls -l /dev/my_device"
+          expect: "/dev/my_device"
+          timeout: 5
+
+        - name: "ioctl_test"
+          send: "my_driver_test --ioctl-loopback"
+          expect: "PASS"
+          timeout: 30
+
+    - name: "cleanup"
+      steps:
+        - name: "rmmod"
+          send: "rmmod my_driver"
+          wait_for: "#"
+          timeout: 5
