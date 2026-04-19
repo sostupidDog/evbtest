@@ -63,6 +63,8 @@ class SSHConnection(ConnectionBase):
             )
             self._channel.settimeout(0.1)
             self._state = ConnectionState.CONNECTED
+            if self._session_log_path:
+                self._buffer.set_session_log(self._session_log_path)
         except Exception as e:
             self._state = ConnectionState.ERROR
             raise ConnectionError(f"SSH connection failed: {e}") from e
@@ -70,6 +72,7 @@ class SSHConnection(ConnectionBase):
     def disconnect(self) -> None:
         """Tear down SSH connection."""
         try:
+            self._buffer.close_session_log()
             if self._channel:
                 self._channel.close()
             if self._client:
@@ -84,7 +87,10 @@ class SSHConnection(ConnectionBase):
         if self._channel is None:
             raise ConnectionError("Not connected")
         if isinstance(data, str):
+            self._buffer.log_send(data)
             data = data.encode("utf-8")
+        else:
+            self._buffer.log_send(data.decode("utf-8", errors="replace"))
         self._channel.sendall(data)
 
     def drain(self) -> None:

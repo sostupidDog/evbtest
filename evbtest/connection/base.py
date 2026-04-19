@@ -3,6 +3,7 @@
 import re
 from abc import ABC, abstractmethod
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 
@@ -24,12 +25,14 @@ class ConnectionBase(ABC):
     - Call send() to write data/command bytes
     - Call read() or read_until() to consume output
     - Call disconnect() to tear down
+    - Call set_session_log() to enable I/O logging to file
     """
 
     def __init__(self, connection_id: str, timeout: float = 30.0):
         self.connection_id = connection_id
         self.timeout = timeout
         self._state = ConnectionState.DISCONNECTED
+        self._session_log_path: str | None = None
 
     @property
     def state(self) -> ConnectionState:
@@ -65,6 +68,14 @@ class ConnectionBase(ABC):
     def drain(self) -> None:
         """Discard any buffered output. Called before sending a new command
         to ensure read_until only matches data arriving AFTER the send."""
+
+    def set_session_log(self, path: str | Path) -> None:
+        """Enable session logging: all sent/received data written to file."""
+        self._session_log_path = str(path)
+
+    def close_session_log(self) -> None:
+        """Close session log file."""
+        self._session_log_path = None
 
     def __enter__(self):
         self.connect()

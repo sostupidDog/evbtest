@@ -57,6 +57,8 @@ class SerialTCPConnection(ConnectionBase):
             )
             self._reader_thread.start()
             self._state = ConnectionState.CONNECTED
+            if self._session_log_path:
+                self._buffer.set_session_log(self._session_log_path)
         except Exception as e:
             self._state = ConnectionState.ERROR
             raise ConnectionError(f"TCP serial connection failed: {e}") from e
@@ -82,6 +84,7 @@ class SerialTCPConnection(ConnectionBase):
     def disconnect(self) -> None:
         """Tear down TCP connection."""
         self._stop_event.set()
+        self._buffer.close_session_log()
         if self._socket:
             try:
                 self._socket.close()
@@ -98,7 +101,10 @@ class SerialTCPConnection(ConnectionBase):
         if self._socket is None:
             raise ConnectionError("Not connected")
         if isinstance(data, str):
+            self._buffer.log_send(data)
             data = data.encode("utf-8")
+        else:
+            self._buffer.log_send(data.decode("utf-8", errors="replace"))
         self._socket.sendall(data)
 
     def drain(self) -> None:

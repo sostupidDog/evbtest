@@ -3,6 +3,8 @@
 import re
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 
@@ -10,12 +12,7 @@ class OutputBuffer:
     """Thread-safe output buffer with regex pattern matching.
 
     Used by both SSH and TCP serial connections.
-    Provides:
-      - append(text): add new output (from reader thread)
-      - read_new(): get everything since last read
-      - wait_for_pattern(): block until regex appears or timeout
-      - peek_unconsumed(): non-blocking check without advancing position
-      - clear(): discard buffered content
+    Optionally writes all I/O to a session log file.
     """
 
     def __init__(self, max_size: int = 1_000_000):
@@ -24,6 +21,36 @@ class OutputBuffer:
         self._condition = threading.Condition(self._lock)
         self._max_size = max_size
         self._read_pos = 0
+        self._log_file = None
+        self._log_lock = threading.Lock()
+
+    def set_session_log(self, path: str | Path) -> None:
+        """Open a session log file. All subsequent append/send data is written."""
+        with self._log_lock:
+            if self._log_file:
+                self._log_file.close()
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._log_file = open(path, "a", encoding="utf-8")
+
+    def close_session_log(self) -> None:
+        """Close the session log file."""
+        with self._log_lock:
+            if self._log_file:
+                self._log_file.close()
+                self._log_file = None
+
+    def _write_log(self, direction: str, text: str) -> None:
+        """Write a log entry. direction is '>>>' for sent, '<<<' for received."""
+        with self._log_lock:
+            if self._log_file:
+                ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                self._log_file.write(f"[{ts}] {direction} {text}")
+                self._log_file.flush()
+
+    def log_send(self, data: str) -> None:
+        """Log data sent to device."""
+        self._write_log(">>>", data)
 
     def append(self, text: str) -> None:
         """Add new output data. Called from reader threads."""
@@ -35,6 +62,8 @@ class OutputBuffer:
                 self._buffer = self._buffer[overflow:]
                 self._read_pos = max(0, self._read_pos - overflow)
             self._condition.notify_all()
+        # Log outside the condition lock to avoid contention
+        self._write_log("<<<", text)
 
     def read_new(self, wait: bool = False, timeout: float = 1.0) -> str:
         """Return all text since last read_new call. Advances read position."""
@@ -78,11 +107,7 @@ class OutputBuffer:
             return self._buffer[self._read_pos :]
 
     def drain(self) -> None:
-        """Advance read position to end, discarding unconsumed data.
-
-        Called before sending a new command to ensure wait_for_pattern
-        only matches data that arrives AFTER the command is sent.
-        """
+        """Advance read position to end, discarding unconsumed data."""
         with self._condition:
             self._read_pos = len(self._buffer)
 

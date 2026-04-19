@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from evbtest.api.device import DeviceHandle
@@ -26,6 +27,7 @@ class DeviceTestTask:
     test_type: str  # "yaml" or "python"
     test_path: str
     result: TestResult | None = None
+    log_path: str | None = None
 
 
 class ParallelRunner:
@@ -36,16 +38,20 @@ class ParallelRunner:
       - Device connections are thread-based (paramiko, sockets) but wrapped
         in asyncio.run_in_executor for non-blocking operation
       - Semaphore caps the total concurrent device connections
+      - Each task gets a session log file capturing all device I/O
     """
 
     def __init__(
         self,
         device_configs: dict[str, DeviceConfig],
         max_concurrent: int = 10,
+        log_dir: str = "logs",
     ):
         self._device_configs = device_configs
         self._max_concurrent = max_concurrent
+        self._log_dir = log_dir
         self._log = logging.getLogger("evbtest.parallel")
+        self._run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     async def run_tests(self, tasks: list[DeviceTestTask]) -> ParallelRunResult:
         """Run all device/test tasks concurrently."""
@@ -116,11 +122,21 @@ class ParallelRunner:
                 end_time=time.monotonic(),
             )
 
+        # Create session log file for this task
+        log_path = Path(self._log_dir) / self._run_timestamp / (
+            f"{task.device_name}_{task.test_name}.log"
+        )
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        task.log_path = str(log_path)
+
         connection = create_connection(device_config)
+        connection.set_session_log(log_path)
         try:
             self._log.info(f"Connecting to {task.device_name}...")
             connection.connect()
-            self._log.info(f"Connected to {task.device_name}")
+            self._log.info(
+                f"Connected to {task.device_name}, log: {log_path}"
+            )
 
             device = DeviceHandle(device_config, connection)
 

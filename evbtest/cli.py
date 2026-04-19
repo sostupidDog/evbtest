@@ -86,12 +86,21 @@ def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, out
             )
 
     # Run tests
-    runner = ParallelRunner(device_configs, max_concurrent=max_concurrent)
+    runner = ParallelRunner(
+        device_configs, max_concurrent=max_concurrent, log_dir=output
+    )
     result = asyncio.run(runner.run_tests(tasks))
 
     # Print summary
     test_logger = TestLogger()
     test_logger.print_summary(result)
+
+    # Print log file paths
+    log_tasks = [t for t in tasks if t.log_path]
+    if log_tasks:
+        console.print("\n[dim]Session logs:[/dim]")
+        for t in log_tasks:
+            console.print(f"  [dim]{t.log_path}[/dim]")
 
     # Exit code
     sys.exit(1 if result.failed > 0 or result.errors > 0 else 0)
