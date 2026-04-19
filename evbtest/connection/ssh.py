@@ -2,6 +2,7 @@
 
 import re
 import socket
+import threading
 import time
 from typing import Optional
 
@@ -20,7 +21,11 @@ class SSHConnection(ConnectionBase):
     """SSH transport using paramiko invoke_shell for persistent session.
 
     Uses invoke_shell() rather than exec_command() to maintain a persistent
-    terminal session across multi-step flows (e.g., U-Boot → Linux boot).
+    terminal session across multi-step flows (e.g., U-Boot -> Linux boot).
+
+    A background reader thread continuously drains the SSH channel into the
+    output buffer, enabling condition-variable-based waiting in read_until
+    instead of polling recv().
     """
 
     def __init__(
@@ -42,6 +47,8 @@ class SSHConnection(ConnectionBase):
         self._client: paramiko.SSHClient | None = None
         self._channel: paramiko.Channel | None = None
         self._buffer = OutputBuffer()
+        self._reader_thread: threading.Thread | None = None
+        self._stop_event = threading.Event()
 
     def connect(self) -> None:
         """Establish SSH connection and open interactive shell."""
@@ -62,6 +69,14 @@ class SSHConnection(ConnectionBase):
                 term="xterm", width=200, height=50
             )
             self._channel.settimeout(0.1)
+
+            # Start background reader thread
+            self._stop_event.clear()
+            self._reader_thread = threading.Thread(
+                target=self._reader_loop, daemon=True
+            )
+            self._reader_thread.start()
+
             self._state = ConnectionState.CONNECTED
             if self._session_log_path:
                 self._buffer.set_session_log(self._session_log_path)
@@ -69,18 +84,46 @@ class SSHConnection(ConnectionBase):
             self._state = ConnectionState.ERROR
             raise ConnectionError(f"SSH connection failed: {e}") from e
 
+    def _reader_loop(self) -> None:
+        """Background thread: continuously read from SSH channel into buffer."""
+        while not self._stop_event.is_set():
+            try:
+                data = self._channel.recv(4096)
+                if not data:
+                    self._state = ConnectionState.DISCONNECTED
+                    break
+                text = data.decode("utf-8", errors="replace")
+                self._buffer.append(text)
+            except socket.timeout:
+                continue
+            except OSError:
+                if not self._stop_event.is_set():
+                    self._state = ConnectionState.ERROR
+                break
+
     def disconnect(self) -> None:
         """Tear down SSH connection."""
-        try:
-            self._buffer.close_session_log()
-            if self._channel:
+        self._stop_event.set()
+        self._buffer.close_session_log()
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=5.0)
+        if self._channel:
+            try:
                 self._channel.close()
-            if self._client:
-                self._client.close()
-        finally:
-            self._channel = None
-            self._client = None
-            self._state = ConnectionState.DISCONNECTED
+            except OSError:
+                pass
+        if self._client:
+            self._client.close()
+        self._channel = None
+        self._client = None
+        self._reader_thread = None
+        self._state = ConnectionState.DISCONNECTED
+
+    def set_session_log(self, path) -> None:
+        """Set session log path and open log file if already connected."""
+        self._session_log_path = str(path)
+        if self._state == ConnectionState.CONNECTED:
+            self._buffer.set_session_log(path)
 
     def send(self, data: bytes | str) -> None:
         """Send data over SSH channel."""
@@ -99,68 +142,18 @@ class SSHConnection(ConnectionBase):
         self._buffer.log_command_block(command, output)
 
     def read(self, timeout: float | None = None) -> str:
-        """Poll channel for available data."""
-        if self._channel is None:
-            raise ConnectionError("Not connected")
-
-        deadline = time.monotonic() + (timeout or self.timeout)
-        collected = ""
-
-        while time.monotonic() < deadline:
-            try:
-                chunk = self._channel.recv(4096)
-                if chunk:
-                    text = chunk.decode("utf-8", errors="replace")
-                    self._buffer.append(text)
-                    collected += text
-                else:
-                    # Channel closed
-                    self._state = ConnectionState.DISCONNECTED
-                    raise ConnectionClosedError("SSH channel closed")
-            except socket.timeout:
-                if collected:
-                    break
-                continue
-        return collected
+        """Return everything accumulated in the buffer since last read."""
+        return self._buffer.read_new(wait=True, timeout=timeout or self.timeout)
 
     def read_until(
         self,
         pattern: str | re.Pattern,
         timeout: float | None = None,
     ) -> tuple[str, re.Match | None]:
-        """Block until pattern appears in SSH output or timeout."""
-        if self._channel is None:
-            raise ConnectionError("Not connected")
+        """Block until pattern appears in output or timeout.
 
-        if isinstance(pattern, str):
-            regex = re.compile(pattern)
-        else:
-            regex = pattern
-
-        effective_timeout = timeout or self.timeout
-        deadline = time.monotonic() + effective_timeout
-
-        while True:
-            # Check unconsumed buffer for pattern (without advancing position)
-            unconsumed = self._buffer.peek_unconsumed()
-            match = regex.search(unconsumed)
-            if match:
-                # Consume everything up to current buffer end
-                self._buffer.read_new(wait=False)
-                return unconsumed, match
-
-            if time.monotonic() >= deadline:
-                # Timeout - return unconsumed data WITHOUT consuming it
-                return unconsumed, None
-
-            # Try to receive more data
-            try:
-                chunk = self._channel.recv(4096)
-                if chunk:
-                    text = chunk.decode("utf-8", errors="replace")
-                    self._buffer.append(text)
-                else:
-                    self._state = ConnectionState.DISCONNECTED
-                    raise ConnectionClosedError("SSH channel closed")
-            except socket.timeout:
-                pass
+        The background reader thread continuously feeds data into the buffer,
+        so we delegate to the buffer's wait_for_pattern method which uses
+        a Condition variable for efficient blocking.
+        """
+        return self._buffer.wait_for_pattern(pattern, timeout=timeout or self.timeout)

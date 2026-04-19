@@ -16,7 +16,8 @@ class OutputBuffer:
     """
 
     def __init__(self, max_size: int = 1_000_000):
-        self._buffer = ""
+        self._chunks: list[str] = []
+        self._length = 0
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._max_size = max_size
@@ -37,6 +38,7 @@ class OutputBuffer:
         """Close the session log file."""
         with self._log_lock:
             if self._log_file:
+                self._log_file.flush()
                 self._log_file.close()
                 self._log_file = None
 
@@ -60,7 +62,7 @@ class OutputBuffer:
                 clean = self._ANSI_RE.sub("", text)
                 clean = clean.replace("\r\n", "\n").replace("\r", "")
                 self._log_file.write(clean)
-            self._log_file.flush()
+            # No flush here — flushed at command boundary in log_command_block
 
     def log_send(self, data: str) -> None:
         """Log data sent to device."""
@@ -86,21 +88,37 @@ class OutputBuffer:
     def append(self, text: str) -> None:
         """Add new output data. Called from reader threads."""
         with self._condition:
-            self._buffer += text
+            self._chunks.append(text)
+            self._length += len(text)
             # Trim from front if over max size
-            if len(self._buffer) > self._max_size:
-                overflow = len(self._buffer) - self._max_size
-                self._buffer = self._buffer[overflow:]
-                self._read_pos = max(0, self._read_pos - overflow)
+            if self._length > self._max_size:
+                self._compact()
             self._condition.notify_all()
+
+    def _compact(self) -> None:
+        """Join chunks and trim to max_size, keeping the tail."""
+        joined = "".join(self._chunks)
+        overflow = len(joined) - self._max_size
+        if overflow > 0:
+            joined = joined[overflow:]
+            self._read_pos = max(0, self._read_pos - overflow)
+        self._chunks = [joined]
+        self._length = len(joined)
+
+    def _materialize(self) -> str:
+        """Join chunks into a single string. Call only while holding _lock."""
+        if len(self._chunks) > 1:
+            self._chunks = ["".join(self._chunks)]
+        return self._chunks[0] if self._chunks else ""
 
     def read_new(self, wait: bool = False, timeout: float = 1.0) -> str:
         """Return all text since last read_new call. Advances read position."""
         with self._condition:
-            if wait and self._read_pos >= len(self._buffer):
+            if wait and self._read_pos >= self._length:
                 self._condition.wait(timeout=timeout)
-            new_text = self._buffer[self._read_pos :]
-            self._read_pos = len(self._buffer)
+            buf = self._materialize()
+            new_text = buf[self._read_pos :]
+            self._read_pos = len(buf)
             return new_text
 
     def wait_for_pattern(
@@ -112,18 +130,16 @@ class OutputBuffer:
         and returns the matched text. On timeout, does NOT advance _read_pos
         so data is preserved for the next caller.
         """
-        if isinstance(pattern, str):
-            regex = re.compile(pattern)
-        else:
-            regex = pattern
+        regex = pattern if isinstance(pattern, re.Pattern) else re.compile(pattern)
 
         deadline = time.monotonic() + timeout
         with self._condition:
             while True:
-                unconsumed = self._buffer[self._read_pos :]
+                buf = self._materialize()
+                unconsumed = buf[self._read_pos :]
                 match = regex.search(unconsumed)
                 if match:
-                    self._read_pos = len(self._buffer)
+                    self._read_pos = len(buf)
                     return unconsumed, match
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -133,20 +149,22 @@ class OutputBuffer:
     def peek_unconsumed(self) -> str:
         """Return unconsumed text without advancing read position."""
         with self._lock:
-            return self._buffer[self._read_pos :]
+            buf = self._materialize()
+            return buf[self._read_pos :]
 
     def drain(self) -> None:
         """Advance read position to end, discarding unconsumed data."""
         with self._condition:
-            self._read_pos = len(self._buffer)
+            self._read_pos = self._length
 
     def clear(self) -> None:
         """Discard all buffered content."""
         with self._condition:
-            self._buffer = ""
+            self._chunks = []
+            self._length = 0
             self._read_pos = 0
 
     def get_all(self) -> str:
         """Return entire buffer contents without advancing read position."""
         with self._lock:
-            return self._buffer
+            return self._materialize()

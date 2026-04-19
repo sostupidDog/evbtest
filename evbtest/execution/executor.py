@@ -41,7 +41,7 @@ class CommandExecutor:
         echo_strip: bool = True,
     ):
         self._conn = connection
-        self._default_prompt = default_prompt
+        self._default_prompt = re.compile(default_prompt)
         self._echo_strip = echo_strip
 
     def execute(
@@ -83,7 +83,7 @@ class CommandExecutor:
             # Fire-and-forget
             return CommandResult(command=command, output="", elapsed=0.0)
 
-        # Always wait for default prompt — guarantees complete output
+        # Always wait for default prompt -- guarantees complete output
         output, match = self._conn.read_until(
             self._default_prompt, timeout=effective_timeout
         )
@@ -165,41 +165,49 @@ class CommandExecutor:
         """Wait for any of several patterns.
 
         Returns (result, index_of_matched_pattern).
-        Useful for 'wait for login: OR wait for U-Boot>'.
+        Useful for 'wait for login: OR wait for U-Boot'.
+
+        Combines all patterns into a single regex so only one read_until
+        call is needed, avoiding the busy-wait loop.
         """
         effective_timeout = timeout or self._conn.timeout
         compiled = [re.compile(p) for p in patterns]
-        deadline = time.monotonic() + effective_timeout
+
+        # Combine into single regex: (?:p1)|(?:p2)|(?:p3)
+        combined = re.compile("|".join(f"(?:{p})" for p in patterns))
+
         start = time.monotonic()
+        output, match = self._conn.read_until(combined, timeout=effective_timeout)
+        elapsed = time.monotonic() - start
 
-        while True:
-            for i, regex in enumerate(compiled):
-                output, match = self._conn.read_until(regex.pattern, timeout=0.05)
-                if match is not None:
-                    elapsed = time.monotonic() - start
-                    return (
-                        CommandResult(
-                            command="<wait_any>",
-                            output=output,
-                            match=match,
-                            success=True,
-                            elapsed=elapsed,
-                        ),
-                        i,
-                    )
+        if match is None:
+            return (
+                CommandResult(
+                    command="<wait_any>",
+                    output=output,
+                    success=False,
+                    elapsed=elapsed,
+                ),
+                -1,
+            )
 
-            if time.monotonic() >= deadline:
-                elapsed = time.monotonic() - start
-                output = self._conn.read(timeout=0.1)
-                return (
-                    CommandResult(
-                        command="<wait_any>",
-                        output=output,
-                        success=False,
-                        elapsed=elapsed,
-                    ),
-                    -1,
-                )
+        # Determine which original pattern matched
+        matched_idx = -1
+        for i, regex in enumerate(compiled):
+            if regex.search(output):
+                matched_idx = i
+                break
+
+        return (
+            CommandResult(
+                command="<wait_any>",
+                output=output,
+                match=match,
+                success=True,
+                elapsed=elapsed,
+            ),
+            matched_idx,
+        )
 
     def send_line(self, text: str) -> None:
         """Send text + newline without waiting. Fire-and-forget."""

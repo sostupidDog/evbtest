@@ -70,7 +70,11 @@ class ConnectionBase(ABC):
         to ensure read_until only matches data arriving AFTER the send."""
 
     def set_session_log(self, path: str | Path) -> None:
-        """Enable session logging: all sent/received data written to file."""
+        """Enable session logging: all sent/received data written to file.
+
+        Stores the path. Subclasses should override to also open the log
+        file if already connected.
+        """
         self._session_log_path = str(path)
 
     def close_session_log(self) -> None:

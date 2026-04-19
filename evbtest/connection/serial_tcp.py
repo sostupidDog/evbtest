@@ -96,6 +96,12 @@ class SerialTCPConnection(ConnectionBase):
         self._reader_thread = None
         self._state = ConnectionState.DISCONNECTED
 
+    def set_session_log(self, path) -> None:
+        """Set session log path and open log file if already connected."""
+        self._session_log_path = str(path)
+        if self._state == ConnectionState.CONNECTED:
+            self._buffer.set_session_log(path)
+
     def send(self, data: bytes | str) -> None:
         """Send data over TCP socket."""
         if self._socket is None:

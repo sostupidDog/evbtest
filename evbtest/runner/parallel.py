@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -34,11 +35,11 @@ class ParallelRunner:
     """Run tests across multiple devices concurrently using asyncio.
 
     Architecture:
-      - Each device gets its own asyncio task
-      - Device connections are thread-based (paramiko, sockets) but wrapped
-        in asyncio.run_in_executor for non-blocking operation
-      - Semaphore caps the total concurrent device connections
-      - Each task gets a session log file capturing all device I/O
+      - Tasks are grouped by device. Each device gets one connection that
+        is reused across all its test tasks.
+      - Different devices run in parallel; tasks on the same device run
+        sequentially (sharing one connection).
+      - Semaphore caps the total concurrent device connections.
     """
 
     def __init__(
@@ -62,8 +63,16 @@ class ParallelRunner:
         start = time.monotonic()
         self._log.info(f"Starting parallel run: {len(tasks)} tasks")
 
+        # Group tasks by device
+        device_tasks: dict[str, list[DeviceTestTask]] = defaultdict(list)
+        for task in tasks:
+            device_tasks[task.device_name].append(task)
+
         semaphore = asyncio.Semaphore(self._max_concurrent)
-        coroutines = [self._run_single(task, semaphore) for task in tasks]
+        coroutines = [
+            self._run_device_tasks(dev_name, dev_tasks, semaphore)
+            for dev_name, dev_tasks in device_tasks.items()
+        ]
         await asyncio.gather(*coroutines, return_exceptions=True)
 
         duration = time.monotonic() - start
@@ -88,48 +97,72 @@ class ParallelRunner:
         )
         return run_result
 
-    async def _run_single(
-        self, task: DeviceTestTask, semaphore: asyncio.Semaphore
+    async def _run_device_tasks(
+        self,
+        device_name: str,
+        tasks: list[DeviceTestTask],
+        semaphore: asyncio.Semaphore,
     ) -> None:
-        """Execute one test on one device, respecting concurrency limit."""
+        """Run all tasks for a single device, reusing one connection."""
         async with semaphore:
             loop = asyncio.get_event_loop()
+            device_config = self._device_configs.get(device_name)
+            if device_config is None:
+                for task in tasks:
+                    task.result = TestResult(
+                        device=device_name,
+                        test=task.test_name,
+                        status="ERROR",
+                        error=f"Device '{device_name}' not found in config",
+                        start_time=time.monotonic(),
+                        end_time=time.monotonic(),
+                    )
+                    if self._on_task_complete:
+                        self._on_task_complete(task)
+                return
+
+            connection = create_connection(device_config)
             try:
-                task.result = await loop.run_in_executor(
-                    None,
-                    self._execute_sync,
-                    task,
-                )
-            except Exception as e:
-                self._log.error(
-                    f"Task {task.device_name}/{task.test_name}: {e}"
-                )
-                task.result = TestResult(
-                    device=task.device_name,
-                    test=task.test_name,
-                    status="ERROR",
-                    error=str(e),
-                    start_time=time.monotonic(),
-                    end_time=time.monotonic(),
-                )
+                self._log.info(f"Connecting to {device_name}...")
+                await loop.run_in_executor(None, connection.connect)
+                self._log.info(f"Connected to {device_name}")
+
+                for task in tasks:
+                    try:
+                        task.result = await loop.run_in_executor(
+                            None,
+                            self._execute_with_connection,
+                            task,
+                            device_config,
+                            connection,
+                        )
+                    except Exception as e:
+                        self._log.error(
+                            f"Task {device_name}/{task.test_name}: {e}"
+                        )
+                        task.result = TestResult(
+                            device=device_name,
+                            test=task.test_name,
+                            status="ERROR",
+                            error=str(e),
+                            start_time=time.monotonic(),
+                            end_time=time.monotonic(),
+                        )
+                    finally:
+                        if self._on_task_complete:
+                            self._on_task_complete(task)
             finally:
-                if self._on_task_complete:
-                    self._on_task_complete(task)
+                self._log.info(f"Disconnecting from {device_name}...")
+                await loop.run_in_executor(None, connection.disconnect)
 
-    def _execute_sync(self, task: DeviceTestTask) -> TestResult:
-        """Synchronous test execution (runs in thread pool)."""
-        device_config = self._device_configs.get(task.device_name)
-        if device_config is None:
-            return TestResult(
-                device=task.device_name,
-                test=task.test_name,
-                status="ERROR",
-                error=f"Device '{task.device_name}' not found in config",
-                start_time=time.monotonic(),
-                end_time=time.monotonic(),
-            )
-
-        # Create session log file for this task
+    def _execute_with_connection(
+        self,
+        task: DeviceTestTask,
+        device_config: DeviceConfig,
+        connection,
+    ) -> TestResult:
+        """Run a single test using an existing connection (sync, in thread)."""
+        # Setup session log for this task
         log_path = None
         if self._enable_logging:
             log_path = Path(self._log_dir) / self._run_timestamp / (
@@ -137,20 +170,9 @@ class ParallelRunner:
             )
             log_path.parent.mkdir(parents=True, exist_ok=True)
             task.log_path = str(log_path)
-
-        connection = create_connection(device_config)
-        if log_path:
             connection.set_session_log(log_path)
-        try:
-            self._log.info(f"Connecting to {task.device_name}...")
-            connection.connect()
-            if log_path:
-                self._log.info(
-                    f"Connected to {task.device_name}, log: {log_path}"
-                )
-            else:
-                self._log.info(f"Connected to {task.device_name}")
 
+        try:
             device = DeviceHandle(device_config, connection)
 
             if task.test_type == "yaml":
@@ -159,7 +181,6 @@ class ParallelRunner:
             else:
                 runner = PythonTestCaseRunner(device)
                 results = runner.run_file(task.test_path)
-                # Return first result (or aggregate if multiple tests in file)
                 if results:
                     return results[0]
                 return TestResult(
@@ -171,5 +192,4 @@ class ParallelRunner:
                     end_time=time.monotonic(),
                 )
         finally:
-            self._log.info(f"Disconnecting from {task.device_name}...")
-            connection.disconnect()
+            connection.close_session_log()
