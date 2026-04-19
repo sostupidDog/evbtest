@@ -97,6 +97,9 @@ evb-test run -t testcases/yaml/smoke.yaml
 # Disable session logs
 evb-test run --no-log
 
+# With preflight environment check
+evb-test run --preflight testcases/yaml/preflight.yaml
+
 # Interactive debug session
 evb-test connect my_server
 
@@ -127,6 +130,7 @@ evb-test list-devices
 | `--max-concurrent` | `-j` | 5 | Max parallel device connections |
 | `--fail-fast` | `-x` | off | Stop on first failure |
 | `--no-log` | | off | Disable session log files |
+| `--preflight` | `-p` | off | Preflight check YAML (runs before all tests per device) |
 | `--output` | `-o` | `logs/` | Output directory |
 
 ## YAML Test Format
@@ -180,6 +184,34 @@ Example — multi-line results where any "fail" means the test failed:
   wait_for: "All done"
   expect_not: "fail|FAIL|error"
 ```
+
+## Preflight Checks
+
+Run environment checks on each device before any tests. If preflight fails, all tests for that device are skipped.
+
+```bash
+evb-test run --preflight testcases/yaml/preflight.yaml
+```
+
+Preflight YAML format — uses the same step syntax as test cases:
+
+```yaml
+preflight:
+  settings:
+    default_timeout: 10
+  steps:
+    - name: "check_firmware_exists"
+      send: "ls /tmp/firmware.bin"
+      wait_for: "firmware.bin"
+    - name: "check_tool_installed"
+      send: "which flash_tool"
+      wait_for: "/usr/bin/flash_tool"
+    - name: "check_no_stale_process"
+      send: "pgrep stale_daemon"
+      expect_not: "\\d+"        # No stale process should be running
+```
+
+If any step fails, all tests for that device are marked `SKIP` with reason "Preflight check failed".
 
 ## Python Test API
 

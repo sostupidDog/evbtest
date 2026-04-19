@@ -24,6 +24,7 @@ evb-test run -D <device>                   # Run on specific device only
 evb-test run -t <path>                     # Run specific test file or directory
 evb-test run --no-log                      # Disable session log files
 evb-test run -x                            # Stop on first failure
+evb-test run --preflight <file>            # Preflight env check (skip tests on failure)
 evb-test connect <device>                  # Interactive debug session
 evb-test check <test.yaml>                 # Validate YAML syntax
 ```
@@ -77,6 +78,24 @@ test:
 ```
 
 Step fields: `send`, `send_raw`, `wait_for` (regex, must match), `expect` (extra positive assertion), `expect_not` (negative assertion — output must NOT contain), `timeout`, `on_timeout` (fail|continue), `delay_before`, `delay_after`.
+
+### Preflight Checks
+
+Run environment checks before all tests per device. If any step fails, all tests for that device are skipped.
+
+```yaml
+preflight:
+  settings:
+    default_timeout: 10
+  steps:
+    - name: "check_file"
+      send: "ls /tmp/firmware.bin"
+      wait_for: "firmware.bin"
+```
+
+```bash
+evb-test run --preflight testcases/yaml/preflight.yaml
+```
 
 ### Python (`testcases/python/*.py`)
 

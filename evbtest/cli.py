@@ -41,8 +41,9 @@ def cli(ctx, verbose):
 @click.option("--fail-fast", "-x", is_flag=True, help="Stop on first failure")
 @click.option("--output", "-o", default="logs/", help="Output directory")
 @click.option("--no-log", is_flag=True, help="Disable session log files")
+@click.option("--preflight", "-p", default=None, help="Preflight check YAML (run before all tests per device)")
 @click.pass_context
-def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, output, no_log):
+def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, output, no_log, preflight):
     """Run test suite against configured devices."""
     console.print("[bold cyan]evb-test[/bold cyan] - Starting test run")
 
@@ -99,7 +100,9 @@ def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, out
         r = task.result
         if r is None:
             return
-        status_color = "green" if r.status == "PASS" else "red"
+        status_color = {
+            "PASS": "green", "FAIL": "red", "ERROR": "red", "SKIP": "yellow",
+        }.get(r.status, "white")
         console.print(
             f"  [{completed[0]}/{total_tasks}] "
             f"[{status_color}]{r.status}[/{status_color}] "
@@ -108,9 +111,18 @@ def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, out
 
     # Run tests
     console.print("[bold]Running tests...[/bold]")
+    # Validate preflight file if specified
+    if preflight:
+        preflight_path = Path(preflight)
+        if not preflight_path.exists():
+            console.print(f"[red]Preflight file not found: {preflight}[/red]")
+            sys.exit(1)
+        preflight = str(preflight_path)
+
     runner = ParallelRunner(
         device_configs, max_concurrent=max_concurrent, log_dir=output,
         enable_logging=not no_log, on_task_complete=on_task_complete,
+        preflight_path=preflight,
     )
     result = asyncio.run(runner.run_tests(tasks))
 

@@ -56,7 +56,9 @@ class TestLogger:
         table.add_column("Duration")
 
         for r in run_result.results:
-            color = "green" if r.status == "PASS" else "red"
+            color = {
+                "PASS": "green", "FAIL": "red", "ERROR": "red", "SKIP": "yellow",
+            }.get(r.status, "white")
             table.add_row(
                 r.device,
                 r.test,
@@ -83,10 +85,20 @@ class TestLogger:
                             for line in step.output.strip().split("\n")[-3:]:
                                 self.console.print(f"      [dim]{line}[/dim]")
 
+        # Show skipped tests
+        skipped_results = [r for r in run_result.results if r.status == "SKIP"]
+        if skipped_results:
+            self.console.print("\n[bold yellow]Skipped (preflight failed):[/bold yellow]")
+            for r in skipped_results:
+                self.console.print(f"  [yellow]⊘[/yellow] {r.test} @ {r.device}")
+                if r.error:
+                    self.console.print(f"    [dim]{r.error}[/dim]")
+
         self.console.print(
             f"\n[bold]Total: {run_result.total} | "
             f"[green]Passed: {run_result.passed}[/green] | "
             f"[red]Failed: {run_result.failed}[/red] | "
-            f"[yellow]Errors: {run_result.errors}[/yellow][/bold] "
+            f"[yellow]Errors: {run_result.errors}[/yellow] | "
+            f"[yellow]Skipped: {run_result.skipped}[/yellow][/bold] "
             f"in {run_result.duration:.1f}s"
         )

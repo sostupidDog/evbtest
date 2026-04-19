@@ -49,12 +49,14 @@ class ParallelRunner:
         log_dir: str = "logs",
         enable_logging: bool = True,
         on_task_complete=None,
+        preflight_path: str | None = None,
     ):
         self._device_configs = device_configs
         self._max_concurrent = max_concurrent
         self._log_dir = log_dir
         self._enable_logging = enable_logging
         self._on_task_complete = on_task_complete
+        self._preflight_path = preflight_path
         self._log = logging.getLogger("evbtest.parallel")
         self._run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -86,6 +88,8 @@ class ParallelRunner:
                     run_result.passed += 1
                 elif task.result.status == "FAIL":
                     run_result.failed += 1
+                elif task.result.status == "SKIP":
+                    run_result.skipped += 1
                 else:
                     run_result.errors += 1
             else:
@@ -126,6 +130,32 @@ class ParallelRunner:
                 self._log.info(f"Connecting to {device_name}...")
                 await loop.run_in_executor(None, connection.connect)
                 self._log.info(f"Connected to {device_name}")
+
+                # Run preflight check if configured
+                if self._preflight_path:
+                    preflight_ok = await loop.run_in_executor(
+                        None,
+                        self._run_preflight,
+                        device_name,
+                        device_config,
+                        connection,
+                    )
+                    if not preflight_ok:
+                        self._log.warning(
+                            f"Preflight failed for {device_name}, skipping all tests"
+                        )
+                        for task in tasks:
+                            task.result = TestResult(
+                                device=device_name,
+                                test=task.test_name,
+                                status="SKIP",
+                                error="Preflight check failed",
+                                start_time=time.monotonic(),
+                                end_time=time.monotonic(),
+                            )
+                            if self._on_task_complete:
+                                self._on_task_complete(task)
+                        return
 
                 for task in tasks:
                     try:
@@ -216,3 +246,36 @@ class ParallelRunner:
                 )
         finally:
             connection.close_session_log()
+
+    def _run_preflight(
+        self,
+        device_name: str,
+        device_config: DeviceConfig,
+        connection,
+    ) -> bool:
+        """Run preflight check steps. Returns True if all checks pass."""
+        import yaml
+
+        with open(self._preflight_path) as f:
+            spec = yaml.safe_load(f)
+
+        steps = spec.get("preflight", {}).get("steps", [])
+        if not steps:
+            return True
+
+        device = DeviceHandle(device_config, connection)
+        runner = YAMLTestCaseRunner(device)
+        # Use a minimal settings dict from the preflight spec
+        settings = spec.get("preflight", {}).get("settings", {})
+
+        for step in steps:
+            step_result = runner._execute_step(step, settings)
+            if not step_result.success:
+                self._log.error(
+                    f"Preflight failed on {device_name}: step '{step_result.name}' "
+                    f"- {step_result.error or 'failed'}"
+                )
+                return False
+
+        self._log.info(f"Preflight passed for {device_name}")
+        return True

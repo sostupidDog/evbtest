@@ -42,5 +42,6 @@ class ParallelRunResult:
     passed: int = 0
     failed: int = 0
     errors: int = 0
+    skipped: int = 0
     results: list[TestResult] = field(default_factory=list)
     duration: float = 0.0
