@@ -40,8 +40,9 @@ def cli(ctx, verbose):
 @click.option("--max-concurrent", "-j", default=5, help="Max parallel devices")
 @click.option("--fail-fast", "-x", is_flag=True, help="Stop on first failure")
 @click.option("--output", "-o", default="logs/", help="Output directory")
+@click.option("--no-log", is_flag=True, help="Disable session log files")
 @click.pass_context
-def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, output):
+def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, output, no_log):
     """Run test suite against configured devices."""
     console.print("[bold cyan]evb-test[/bold cyan] - Starting test run")
 
@@ -87,7 +88,8 @@ def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, out
 
     # Run tests
     runner = ParallelRunner(
-        device_configs, max_concurrent=max_concurrent, log_dir=output
+        device_configs, max_concurrent=max_concurrent, log_dir=output,
+        enable_logging=not no_log,
     )
     result = asyncio.run(runner.run_tests(tasks))
 

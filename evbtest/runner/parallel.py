@@ -46,10 +46,12 @@ class ParallelRunner:
         device_configs: dict[str, DeviceConfig],
         max_concurrent: int = 10,
         log_dir: str = "logs",
+        enable_logging: bool = True,
     ):
         self._device_configs = device_configs
         self._max_concurrent = max_concurrent
         self._log_dir = log_dir
+        self._enable_logging = enable_logging
         self._log = logging.getLogger("evbtest.parallel")
         self._run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -123,20 +125,26 @@ class ParallelRunner:
             )
 
         # Create session log file for this task
-        log_path = Path(self._log_dir) / self._run_timestamp / (
-            f"{task.device_name}_{task.test_name}.log"
-        )
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        task.log_path = str(log_path)
+        log_path = None
+        if self._enable_logging:
+            log_path = Path(self._log_dir) / self._run_timestamp / (
+                f"{task.device_name}_{task.test_name}.log"
+            )
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            task.log_path = str(log_path)
 
         connection = create_connection(device_config)
-        connection.set_session_log(log_path)
+        if log_path:
+            connection.set_session_log(log_path)
         try:
             self._log.info(f"Connecting to {task.device_name}...")
             connection.connect()
-            self._log.info(
-                f"Connected to {task.device_name}, log: {log_path}"
-            )
+            if log_path:
+                self._log.info(
+                    f"Connected to {task.device_name}, log: {log_path}"
+                )
+            else:
+                self._log.info(f"Connected to {task.device_name}")
 
             device = DeviceHandle(device_config, connection)
 
