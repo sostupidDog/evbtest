@@ -1,7 +1,7 @@
 ---
 name: evbtest
 description: Use when the user asks to write/run device tests, test firmware, test kernel drivers, SSH tests, serial tests, or mentions "evb-test" / "evbtest". Use for automating commands on remote devices via SSH or serial console.
-version: 0.3.0
+version: 0.4.0
 ---
 
 # evbtest — Remote Device Test Framework
@@ -127,7 +127,36 @@ class MyTest(TestCase):
     def teardown(self): ...                   # Optional, runs on failure too
 ```
 
-`CommandResult` fields: `output` (str), `success` (bool), `match` (re.Match), `elapsed` (float).
+### Dual-Channel (SSH + Serial on same device)
+
+Add `secondary_connection` to device config, set `use_secondary = True` on test:
+
+```yaml
+devices:
+  my_board:
+    connection:
+      type: ssh
+      host: 192.168.1.10
+      username: root
+      password: "secret"
+    secondary_connection:
+      type: serial_tcp
+      host: 192.168.1.200
+      port: 5001
+```
+
+```python
+class DualTest(TestCase):
+    name = "dual_test"
+    use_secondary = True
+
+    def run(self):
+        ssh = self.device              # Primary (SSH)
+        serial = self.secondary_device  # Secondary (serial)
+        serial.execute("dmesg -w &")
+        ssh.execute("reboot")
+        serial.wait_for("login:", timeout=120)
+```
 
 ## Session Logs
 

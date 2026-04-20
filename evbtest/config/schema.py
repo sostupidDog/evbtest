@@ -42,6 +42,7 @@ class DeviceConfig:
     description: str = ""
     tags: list[str] = field(default_factory=list)
     connection: SSHConfig | SerialTCPConfig = field(default_factory=SSHConfig)
+    secondary_connection: SSHConfig | SerialTCPConfig | None = None
     prompt_pattern: str = r"[#\$>]\s*$"
     login_prompt: str = "login:"
     uboot_prompt: str = "=>"

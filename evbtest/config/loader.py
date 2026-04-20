@@ -25,40 +25,50 @@ class ConfigLoader:
         devices = {}
         for name, spec in raw.get("devices", {}).items():
             conn_spec = spec.get("connection", {})
-            conn_type = conn_spec.get("type", "ssh")
+            conn = ConfigLoader._parse_connection(conn_spec)
 
-            if conn_type == "ssh":
-                conn = SSHConfig(
-                    type="ssh",
-                    host=conn_spec.get("host", ""),
-                    port=conn_spec.get("port", 22),
-                    username=conn_spec.get("username", "root"),
-                    password=conn_spec.get("password"),
-                    key_filename=conn_spec.get("key_filename"),
-                    timeout=conn_spec.get("timeout", 30.0),
-                )
-            elif conn_type == "serial_tcp":
-                conn = SerialTCPConfig(
-                    type="serial_tcp",
-                    host=conn_spec.get("host", ""),
-                    port=conn_spec.get("port", 5000),
-                    baud_rate=conn_spec.get("baud_rate", 115200),
-                    timeout=conn_spec.get("timeout", 30.0),
-                )
-            else:
-                raise ValueError(f"Unknown connection type: {conn_type}")
+            # Parse optional secondary connection
+            sec_spec = spec.get("secondary_connection")
+            sec_conn = ConfigLoader._parse_connection(sec_spec) if sec_spec else None
 
             devices[name] = DeviceConfig(
                 name=name,
                 description=spec.get("description", ""),
                 tags=spec.get("tags", []),
                 connection=conn,
+                secondary_connection=sec_conn,
                 prompt_pattern=spec.get("prompt_pattern", r"[#\$>]\s*$"),
                 login_prompt=spec.get("login_prompt", "login:"),
                 uboot_prompt=spec.get("uboot_prompt", "=>"),
                 env=spec.get("env", {}),
             )
         return devices
+
+    @staticmethod
+    def _parse_connection(conn_spec: dict) -> SSHConfig | SerialTCPConfig:
+        """Parse a connection spec dict into the appropriate config object."""
+        conn_type = conn_spec.get("type", "ssh")
+
+        if conn_type == "ssh":
+            return SSHConfig(
+                type="ssh",
+                host=conn_spec.get("host", ""),
+                port=conn_spec.get("port", 22),
+                username=conn_spec.get("username", "root"),
+                password=conn_spec.get("password"),
+                key_filename=conn_spec.get("key_filename"),
+                timeout=conn_spec.get("timeout", 30.0),
+            )
+        elif conn_type == "serial_tcp":
+            return SerialTCPConfig(
+                type="serial_tcp",
+                host=conn_spec.get("host", ""),
+                port=conn_spec.get("port", 5000),
+                baud_rate=conn_spec.get("baud_rate", 115200),
+                timeout=conn_spec.get("timeout", 30.0),
+            )
+        else:
+            raise ValueError(f"Unknown connection type: {conn_type}")
 
     @staticmethod
     def load_test_suite(path: str | Path) -> TestSuiteConfig:

@@ -81,11 +81,16 @@ def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, out
         test_type = "yaml" if test_path.suffix in (".yaml", ".yml") else "python"
 
         if test_type == "python":
-            # Discover all TestCase subclasses in the file
-            class_names = PythonTestCaseRunner.discover_class_names(str(test_path))
-            if class_names:
-                for cls_name in class_names:
+            # Discover all TestCase subclasses with metadata
+            class_info = PythonTestCaseRunner.discover_classes(str(test_path))
+            if class_info:
+                for cls_name, meta in class_info:
                     for dev_name in device_configs:
+                        dev_cfg = device_configs[dev_name]
+                        needs_sec = (
+                            meta.get("use_secondary", False)
+                            and dev_cfg.secondary_connection is not None
+                        )
                         tasks.append(
                             DeviceTestTask(
                                 device_name=dev_name,
@@ -93,6 +98,7 @@ def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, out
                                 test_type=test_type,
                                 test_path=str(test_path),
                                 test_class=cls_name,
+                                needs_secondary=needs_sec,
                             )
                         )
             else:

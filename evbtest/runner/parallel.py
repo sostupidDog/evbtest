@@ -28,6 +28,7 @@ class DeviceTestTask:
     test_type: str  # "yaml" or "python"
     test_path: str
     test_class: str | None = None  # Python class name (for multi-class files)
+    needs_secondary: bool = False   # Test requests secondary connection
     result: TestResult | None = None
     log_path: str | None = None
 
@@ -229,26 +230,69 @@ class ParallelRunner:
         try:
             device = DeviceHandle(device_config, connection)
 
-            if task.test_type == "yaml":
-                runner = YAMLTestCaseRunner(device)
-                return runner.run_file(task.test_path)
-            else:
-                runner = PythonTestCaseRunner(device)
-                if task.test_class:
-                    return runner.run_class_by_name(
-                        task.test_path, task.test_class
+            # Handle secondary connection if needed
+            secondary_device = None
+            secondary_connection = None
+            if task.needs_secondary and device_config.secondary_connection:
+                sec_cfg = device_config.secondary_connection
+                secondary_connection = create_connection(
+                    DeviceConfig(
+                        name=f"{device_config.name}_secondary",
+                        connection=sec_cfg,
+                        prompt_pattern=device_config.prompt_pattern,
+                        login_prompt=device_config.login_prompt,
+                        uboot_prompt=device_config.uboot_prompt,
                     )
-                results = runner.run_file(task.test_path)
-                if results:
-                    return results[0]
-                return TestResult(
-                    device=task.device_name,
-                    test=task.test_name,
-                    status="ERROR",
-                    error="No test classes found in Python file",
-                    start_time=time.monotonic(),
-                    end_time=time.monotonic(),
                 )
+                try:
+                    secondary_connection.connect()
+                    secondary_device = DeviceHandle(
+                        DeviceConfig(
+                            name=f"{device_config.name}_secondary",
+                            connection=sec_cfg,
+                            prompt_pattern=device_config.prompt_pattern,
+                            login_prompt=device_config.login_prompt,
+                            uboot_prompt=device_config.uboot_prompt,
+                        ),
+                        secondary_connection,
+                    )
+                except Exception as e:
+                    self._log.error(
+                        f"Secondary connection for {task.device_name} failed: {e}"
+                    )
+                    return TestResult(
+                        device=task.device_name,
+                        test=task.test_name,
+                        status="ERROR",
+                        error=f"Secondary connection failed: {e}",
+                        start_time=time.monotonic(),
+                        end_time=time.monotonic(),
+                    )
+
+            try:
+                if task.test_type == "yaml":
+                    runner = YAMLTestCaseRunner(device)
+                    return runner.run_file(task.test_path)
+                else:
+                    runner = PythonTestCaseRunner(device, secondary_device)
+                    if task.test_class:
+                        return runner.run_class_by_name(
+                            task.test_path, task.test_class
+                        )
+                    results = runner.run_file(task.test_path)
+                    if results:
+                        return results[0]
+                    return TestResult(
+                        device=task.device_name,
+                        test=task.test_name,
+                        status="ERROR",
+                        error="No test classes found in Python file",
+                        start_time=time.monotonic(),
+                        end_time=time.monotonic(),
+                    )
+            finally:
+                if secondary_connection:
+                    secondary_connection.disconnect()
         finally:
             connection.close_session_log()
 

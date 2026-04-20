@@ -8,6 +8,7 @@ Lightweight Python framework for automated testing on remote devices via SSH or 
 - **SSH & Serial TCP** — Connect via SSH or Talent network-to-serial converter
 - **Multi-device parallel** — Run tests across multiple devices concurrently
 - **Connection pooling & auto-reconnect** — Reuses connections across tests, auto-recovers from drops
+- **Dual-channel testing** — SSH + serial simultaneously on the same device (e.g. serial monitor + SSH commands)
 - **File transfer** — SFTP upload/download for SSH connections
 - **Reboot with auto-reconnect** — Reboot device and automatically reconnect with retry
 - **Preflight checks** — Environment validation before tests; skip device on failure
@@ -276,6 +277,47 @@ class SmokeTest(TestCase):
 | `interrupt_uboot(...)` | — | Interrupt U-Boot autoboot |
 | `flash_via_tftp(server, image, ...)` | `CommandResult` | TFTP download + flash |
 | `boot_and_login(...)` | — | Wait for boot then login |
+
+### Dual-Channel Testing (SSH + Serial)
+
+Use both SSH and serial connections to the same device simultaneously. Configure a `secondary_connection` in the device config and set `use_secondary = True` on the test class.
+
+**Device config:**
+
+```yaml
+devices:
+  my_board:
+    description: "ARM64 board with dual channel"
+    connection:
+      type: ssh
+      host: 192.168.1.10
+      port: 22
+      username: root
+      password: "secret"
+    secondary_connection:
+      type: serial_tcp
+      host: 192.168.1.200
+      port: 5001
+    prompt_pattern: "[#\\$]\\s*$"
+```
+
+**Test case:**
+
+```python
+from evbtest.api import TestCase
+
+class DualChannelTest(TestCase):
+    name = "dual_channel_test"
+    use_secondary = True  # Request secondary connection
+
+    def run(self):
+        ssh = self.device              # Primary (SSH)
+        serial = self.secondary_device  # Secondary (serial)
+
+        serial.execute("dmesg -w &")   # Monitor on serial
+        ssh.execute("reboot")          # Trigger via SSH
+        serial.wait_for("login:", timeout=120)
+```
 
 ### CommandResult
 

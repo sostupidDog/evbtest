@@ -14,8 +14,13 @@ from evbtest.reporting.result import TestResult
 class PythonTestCaseRunner:
     """Discover and execute Python test cases."""
 
-    def __init__(self, device: DeviceHandle):
+    def __init__(
+        self,
+        device: DeviceHandle,
+        secondary_device: DeviceHandle | None = None,
+    ):
         self._device = device
+        self._secondary_device = secondary_device
         self._log = logging.getLogger("evbtest.python_runner")
 
     def run_file(self, path: str) -> list[TestResult]:
@@ -105,10 +110,45 @@ class PythonTestCaseRunner:
                 names.append(instance.name)
         return names
 
+    @staticmethod
+    def discover_classes(path: str) -> list[tuple[str, dict]]:
+        """Discover TestCase subclasses and their metadata.
+
+        Returns list of (name, metadata_dict) tuples.
+        metadata_dict includes: use_secondary
+        """
+        file_path = Path(path).resolve()
+        module_name = file_path.stem
+
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if spec is None or spec.loader is None:
+            return []
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        results = []
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if (
+                issubclass(obj, TestCase)
+                and obj is not TestCase
+                and obj.__module__ == module_name
+            ):
+                instance = obj()
+                results.append((
+                    instance.name,
+                    {"use_secondary": getattr(obj, "use_secondary", False)},
+                ))
+        return results
+
     def _run_test_class(self, cls: type[TestCase]) -> TestResult:
         """Execute a single TestCase: setup → run → teardown."""
         instance = cls()
         instance.set_device(self._device)
+
+        # Inject secondary device if test requests it
+        if instance.use_secondary and self._secondary_device is not None:
+            instance.set_secondary_device(self._secondary_device)
 
         result = TestResult(
             device=self._device.name,
