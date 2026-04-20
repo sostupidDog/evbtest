@@ -129,6 +129,10 @@ class OutputBuffer:
         Only searches from _read_pos onwards. On match, advances _read_pos
         and returns the matched text. On timeout, does NOT advance _read_pos
         so data is preserved for the next caller.
+
+        Pattern matching is done on ANSI-stripped text so that escape
+        sequences in the prompt (e.g. \\x1b[m) don't break matching.
+        The returned text preserves the original raw content.
         """
         regex = pattern if isinstance(pattern, re.Pattern) else re.compile(pattern)
 
@@ -137,7 +141,9 @@ class OutputBuffer:
             while True:
                 buf = self._materialize()
                 unconsumed = buf[self._read_pos :]
-                match = regex.search(unconsumed)
+                # Strip ANSI for matching, keep raw for return
+                clean = self._ANSI_RE.sub("", unconsumed)
+                match = regex.search(clean)
                 if match:
                     self._read_pos = len(buf)
                     return unconsumed, match
