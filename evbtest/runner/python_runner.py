@@ -33,6 +33,22 @@ class PythonTestCaseRunner:
         """Run a single TestCase class."""
         return self._run_test_class(test_class)
 
+    def run_class_by_name(self, path: str, class_name: str) -> TestResult:
+        """Run a specific TestCase class by name from a Python file."""
+        test_classes = self._discover_tests(path)
+        for cls in test_classes:
+            instance = cls()
+            if instance.name == class_name or cls.__name__ == class_name:
+                return self._run_test_class(cls)
+        return TestResult(
+            device=self._device.name,
+            test=class_name,
+            status="ERROR",
+            error=f"Test class '{class_name}' not found in {path}",
+            start_time=time.monotonic(),
+            end_time=time.monotonic(),
+        )
+
     def _discover_tests(self, path: str) -> list[type[TestCase]]:
         """Import a Python file and find all TestCase subclasses."""
         file_path = Path(path).resolve()
@@ -59,6 +75,35 @@ class PythonTestCaseRunner:
             self._log.warning(f"No TestCase subclasses found in {path}")
 
         return test_classes
+
+    @staticmethod
+    def discover_class_names(path: str) -> list[str]:
+        """Discover TestCase subclass names in a Python file without running them.
+
+        Returns list of test names (from cls.name, falling back to class __name__).
+        Used by CLI to create one task per test class.
+        """
+        file_path = Path(path).resolve()
+        module_name = file_path.stem
+
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if spec is None or spec.loader is None:
+            return []
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        names = []
+        for _, obj in inspect.getmembers(module, inspect.isclass):
+            if (
+                issubclass(obj, TestCase)
+                and obj is not TestCase
+                and obj.__module__ == module_name
+            ):
+                # Instantiate to get the resolved name
+                instance = obj()
+                names.append(instance.name)
+        return names
 
     def _run_test_class(self, cls: type[TestCase]) -> TestResult:
         """Execute a single TestCase: setup → run → teardown."""

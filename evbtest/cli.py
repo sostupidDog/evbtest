@@ -14,6 +14,7 @@ from evbtest.config.schema import DeviceConfig
 from evbtest.connection import create_connection
 from evbtest.reporting.logger import TestLogger
 from evbtest.runner.parallel import DeviceTestTask, ParallelRunner
+from evbtest.runner.python_runner import PythonTestCaseRunner
 
 console = Console()
 
@@ -78,16 +79,44 @@ def run(ctx, devices, tests, device_filter, tags, max_concurrent, fail_fast, out
     tasks = []
     for test_path in test_files:
         test_type = "yaml" if test_path.suffix in (".yaml", ".yml") else "python"
-        test_name = test_path.stem
-        for dev_name in device_configs:
-            tasks.append(
-                DeviceTestTask(
-                    device_name=dev_name,
-                    test_name=test_name,
-                    test_type=test_type,
-                    test_path=str(test_path),
+
+        if test_type == "python":
+            # Discover all TestCase subclasses in the file
+            class_names = PythonTestCaseRunner.discover_class_names(str(test_path))
+            if class_names:
+                for cls_name in class_names:
+                    for dev_name in device_configs:
+                        tasks.append(
+                            DeviceTestTask(
+                                device_name=dev_name,
+                                test_name=cls_name,
+                                test_type=test_type,
+                                test_path=str(test_path),
+                                test_class=cls_name,
+                            )
+                        )
+            else:
+                # No classes found — still create task to report the error
+                for dev_name in device_configs:
+                    tasks.append(
+                        DeviceTestTask(
+                            device_name=dev_name,
+                            test_name=test_path.stem,
+                            test_type=test_type,
+                            test_path=str(test_path),
+                        )
+                    )
+        else:
+            test_name = test_path.stem
+            for dev_name in device_configs:
+                tasks.append(
+                    DeviceTestTask(
+                        device_name=dev_name,
+                        test_name=test_name,
+                        test_type=test_type,
+                        test_path=str(test_path),
+                    )
                 )
-            )
 
     console.print(f"Total: {len(tasks)} task(s)\n")
 

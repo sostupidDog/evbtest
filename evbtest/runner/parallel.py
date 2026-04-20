@@ -27,6 +27,7 @@ class DeviceTestTask:
     test_name: str
     test_type: str  # "yaml" or "python"
     test_path: str
+    test_class: str | None = None  # Python class name (for multi-class files)
     result: TestResult | None = None
     log_path: str | None = None
 
@@ -233,6 +234,10 @@ class ParallelRunner:
                 return runner.run_file(task.test_path)
             else:
                 runner = PythonTestCaseRunner(device)
+                if task.test_class:
+                    return runner.run_class_by_name(
+                        task.test_path, task.test_class
+                    )
                 results = runner.run_file(task.test_path)
                 if results:
                     return results[0]
